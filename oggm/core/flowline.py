@@ -1519,7 +1519,7 @@ class FluxBasedModel(FlowlineModel):
                 continue
 
             # OK, we're really calving
-            self.calve_by_flux(fl)
+            self.calve_by_flux(fl, last_above_wl, dt)
 
             
 
@@ -1530,7 +1530,7 @@ class FluxBasedModel(FlowlineModel):
         self.t += dt
         return dt
 
-    def calve_by_flux(self, fl):
+    def calve_by_flux(self, fl, last_above_wl, dt):
 
         section = fl.section
 
