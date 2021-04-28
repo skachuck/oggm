@@ -1572,6 +1572,26 @@ class FluxBasedModel(FlowlineModel):
         # We update the glacier with our changes
         fl.section = section
 
+    def calve_by_location(self, fl, x, meters=True):
+        """
+        Calves flowline fl at x. Does NOT check if physically reasonable.
+
+        fl      : flowline to calve
+        x       : calve to element just before x, in meters if meters=True
+                    (default), else x is in simulation units.
+        meters  : bool to set units of x to meters (True) or sim units (False)
+        """
+        if meters:
+            i = np.searchsorted(fl.dis_on_line*fl.dx_meter, x)-1
+        else:
+            i = np.searchsorted(fl.dis_on_line, x)-1
+        section = fl.section
+        self.calving_m3_since_y0 += np.sum(section[i:])
+        section[i:] = 0.
+
+        fl.section = section
+        
+
 
     def get_diagnostics(self, fl_id=-1):
         """Obtain model diagnostics in a pandas DataFrame.
