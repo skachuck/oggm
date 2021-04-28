@@ -41,6 +41,8 @@ from oggm.core.inversion import find_sia_flux_from_thickness
 from oggm.cfg import SEC_IN_DAY, SEC_IN_YEAR
 from oggm.cfg import G, GAUSSIAN_KERNEL
 
+from oggm.fbmarraytracer import FBMFullTracer
+
 # Module logger
 log = logging.getLogger(__name__)
 
@@ -1329,6 +1331,9 @@ class FluxBasedModel(FlowlineModel):
             self.shapefac_stag.append(np.ones(nx+1))  # beware the ones!
             self.flux_stag.append(np.zeros(nx+1))
 
+
+        self.fbmtracers = FBMFullTracer(self, 100)
+
     def step(self, dt):
         """Advance one step."""
 
@@ -1445,6 +1450,7 @@ class FluxBasedModel(FlowlineModel):
             # (like PyGEM) can do wo with a clean glacier state
             mbs.append(self.get_mb(fl.surface_h, self.yr,
                                    fl_id=fl_id, fls=self.fls))
+        
 
         # Time step
         if self.fixed_dt:
@@ -1513,49 +1519,59 @@ class FluxBasedModel(FlowlineModel):
                 continue
 
             # OK, we're really calving
-            section = fl.section
+            self.calve_by_flux(fl)
 
-            # Calving law
-            h = fl.thick[last_above_wl]
-            d = h - (fl.surface_h[last_above_wl] - self.water_level)
-            k = self.calving_k
-            q_calving = k * d * h * fl.widths_m[last_above_wl]
-            # Add to the bucket and the diagnostics
-            fl.calving_bucket_m3 += q_calving * dt
-            self.calving_m3_since_y0 += q_calving * dt
-            self.calving_rate_myr = (q_calving / section[last_above_wl] *
-                                     cfg.SEC_IN_YEAR)
+            
 
-            # See if we have ice below sea-water to clean out first
-            below_sl = (fl.surface_h < self.water_level) & (fl.thick > 0)
-            to_remove = np.sum(section[below_sl]) * fl.dx_meter
-            if 0 < to_remove < fl.calving_bucket_m3:
-                # This is easy, we remove everything
-                section[below_sl] = 0
-                fl.calving_bucket_m3 -= to_remove
-            elif to_remove > 0:
-                # We can only remove part of if
-                section[below_sl] = 0
-                section[last_above_wl+1] = ((to_remove - fl.calving_bucket_m3)
-                                            / fl.dx_meter)
-                fl.calving_bucket_m3 = 0
-
-            # The rest of the bucket might calve an entire grid point (or more?)
-            vol_last = section[last_above_wl] * fl.dx_meter
-            while fl.calving_bucket_m3 > vol_last:
-                fl.calving_bucket_m3 -= vol_last
-                section[last_above_wl] = 0
-
-                # OK check if we need to continue (unlikely)
-                last_above_wl -= 1
-                vol_last = section[last_above_wl] * fl.dx_meter
-
-            # We update the glacier with our changes
-            fl.section = section
-
+        # Advect tracer particles
+        if self.fbmtracers is not None:
+            self.fbmtracers.advect_particles(self, dt)
         # Next step
         self.t += dt
         return dt
+
+    def calve_by_flux(self, fl):
+
+        section = fl.section
+
+        # Calving law
+        h = fl.thick[last_above_wl]
+        d = h - (fl.surface_h[last_above_wl] - self.water_level)
+        k = self.calving_k
+        q_calving = k * d * h * fl.widths_m[last_above_wl]
+        # Add to the bucket and the diagnostics
+        fl.calving_bucket_m3 += q_calving * dt
+        self.calving_m3_since_y0 += q_calving * dt
+        self.calving_rate_myr = (q_calving / section[last_above_wl] *
+                                 cfg.SEC_IN_YEAR)
+
+        # See if we have ice below sea-water to clean out first
+        below_sl = (fl.surface_h < self.water_level) & (fl.thick > 0)
+        to_remove = np.sum(section[below_sl]) * fl.dx_meter
+        if 0 < to_remove < fl.calving_bucket_m3:
+            # This is easy, we remove everything
+            section[below_sl] = 0
+            fl.calving_bucket_m3 -= to_remove
+        elif to_remove > 0:
+            # We can only remove part of if
+            section[below_sl] = 0
+            section[last_above_wl+1] = ((to_remove - fl.calving_bucket_m3)
+                                        / fl.dx_meter)
+            fl.calving_bucket_m3 = 0
+
+        # The rest of the bucket might calve an entire grid point (or more?)
+        vol_last = section[last_above_wl] * fl.dx_meter
+        while fl.calving_bucket_m3 > vol_last:
+            fl.calving_bucket_m3 -= vol_last
+            section[last_above_wl] = 0
+
+            # OK check if we need to continue (unlikely)
+            last_above_wl -= 1
+            vol_last = section[last_above_wl] * fl.dx_meter
+
+        # We update the glacier with our changes
+        fl.section = section
+
 
     def get_diagnostics(self, fl_id=-1):
         """Obtain model diagnostics in a pandas DataFrame.
