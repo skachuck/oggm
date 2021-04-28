@@ -60,15 +60,18 @@ class FBMFullTracer(object):
         # Properties of tracers
         self.x_bundles = []
         self.n_bundles = []
+        self.f_bundles = []
         
         for fl in model.fls:
             if fl.length_m > 0:
                 xfl = np.arange(0, fl.length_m, xsep0)
                 self.x_bundles.append(xfl)
                 self.n_bundles.append(len(xfl))
+                self.f_bundles.append(np.zeros_like(xfl))
             else:
                 self.x_bundles.append([0])
                 self.n_bundles.append(1)
+                self.f_bundles.append(0)
 
         self.xsep = xsep or xsep0
 #        assert compState is None or stepState is None, 'Cannot specify both'
@@ -77,23 +80,27 @@ class FBMFullTracer(object):
 #        if compState is None and stepState is None:
 #            self.compState = strain_thresh
 #
-#        # Fiber bundles 
+        # Fiber bundles 
 #        self.dist = dist or strict_dist()
-#        # Number of fibers per bundle
-#        self.Nf = int(Nf)
+        # Number of fibers per bundle
+        self.Nf = int(Nf)
 #        # Construct the fibers - random thresholds
 #        self.xcs = self.dist((self.N, self.Nf))
 #        # Force on each fiber bundle
 #        self.F = np.zeros(self.N)
 #        # Broken status of each fiber in each tracer
-#        # Extension of each bundle (ELS) is self.F/np.sum(self.ss, axis=1)
-#        self.ss = np.ones((self.N, self.Nf), dtype=bool)
+        # Extension of each bundle (ELS) is self.F/np.sum(self.ss, axis=1)
+        #self.fiber_states = []
+        #for fl_id, fl in enumerate(model.fls):
+        #    self.fiber_states.append(np.zeros((self.n_bundles[fl_id], self.Nf
+
 
         self.listform=False
 
     def _toList(self):
         if self.listform: return
         self.x_bundles = [xfl.tolist() for xfl in self.x_bundles]
+        self.f_bundles = [ffl.tolist() for ffl in self.f_bundles]
 #        self.xcs = self.xcs.tolist()
 #        self.ss = self.ss.tolist()
 #        self.F = self.F.tolist()
@@ -102,6 +109,7 @@ class FBMFullTracer(object):
     def _toArr(self):
         if not self.listform: return
         self.x_bundles = [np.asarray(xfl) for xfl in self.x_bundles]
+        self.f_bundles = [np.asarray(ffl) for ffl in self.f_bundles]
 #        self.xcs = np.asarray(self.xcs) 
 #        self.ss = np.asarray(self.ss)
 #        self.F = np.asarray(self.F)
@@ -149,6 +157,7 @@ class FBMFullTracer(object):
                 index = i
                 break
         self.x_bundles[fl_id].insert(i,xp)
+        self.f_bundles[fl_id].insert(i,state)
 #        self.xcs.insert(i, self.dist(self.Nf))
 #        self.F.insert(i,state)
 #        self.ss.insert(i,np.ones(self.Nf,dtype=bool))
@@ -161,6 +170,7 @@ class FBMFullTracer(object):
         """
         self._toList()
         self.x_bundles[fl_id].pop(i)
+        self.f_bundles[fl_id].pop(i)
 #        self.xcs.pop(i)
 #        self.F.pop(i)
 #        self.ss.pop(i)
@@ -180,7 +190,13 @@ class FBMFullTracer(object):
             # Staggered grid has an additional grid point at end to remove
             u_on_fl = u_on_fl[:-1]
             u_at_tracers = np.interp(self.x_bundles[fl_id], fl.dis_on_line*fl.dx_meter, u_on_fl)
+
+            strain_rate_on_fl = np.gradient(u_on_fl, fl.dx_meter)
+            strain_rate_at_tracers = np.interp(self.x_bundles[fl_id], fl.dis_on_line*fl.dx_meter, strain_rate_on_fl)
+
             self.x_bundles[fl_id] += u_at_tracers*dt
+            self.f_bundles[fl_id] += strain_rate_at_tracers*dt
+
             # remove particles advected beyond the front.
             while np.any(self.x_bundles[fl_id] > fl.length_m) and self.n_bundles[fl_id]>1:
                 self.remove_tracer(-1, fl_id)
@@ -195,7 +211,7 @@ class FBMFullTracer(object):
 #
 #        self.force(F)
 #
-
+        # Drop new particles in at intervals of self.xsep
         for fl_id, fl in enumerate(model.fls):
             if self.x_bundles[fl_id][0] > self.xsep:
                 self.add_tracer(0, fl_id)
