@@ -151,11 +151,7 @@ class FBMFullTracer(object):
         """
         self._toList()
    
-  
-        for i in range(self.n_bundles[fl_id]):
-            if self.x_bundles[fl_id][i] > xp:
-                index = i
-                break
+        i = np.searchsorted(self.x_bundles[fl_id], xp)
         self.x_bundles[fl_id].insert(i,xp)
         self.f_bundles[fl_id].insert(i,state)
 #        self.xcs.insert(i, self.dist(self.Nf))
@@ -177,6 +173,11 @@ class FBMFullTracer(object):
         self.n_bundles[fl_id] -= 1
         self._toArr()
 
+    def interp_to_particles(self, fl_id, fl, yfl):
+        """Interpolate array yfl on flowline fl to particle positions.
+        """
+        return np.interp(self.x_bundles[fl_id], fl.dis_on_line*fl.dx_meter, yfl)
+
     def advect_particles(self, model, dt):
         """
         Advect particles with the flow represented by vector coefficients
@@ -188,11 +189,11 @@ class FBMFullTracer(object):
         for fl_id, fl in enumerate(model.fls): 
             u_on_fl = np.nan_to_num(model.flux_stag[fl_id]/(model.section_stag[fl_id]+1e-6))
             # Staggered grid has an additional grid point at end to remove
-            u_on_fl = u_on_fl[:-1]
-            u_at_tracers = np.interp(self.x_bundles[fl_id], fl.dis_on_line*fl.dx_meter, u_on_fl)
+            u_on_fl = u_on_fl[:-1] 
+            u_at_tracers = self.interp_to_particles(fl_id, fl, u_on_fl) 
 
             strain_rate_on_fl = np.gradient(u_on_fl, fl.dx_meter)
-            strain_rate_at_tracers = np.interp(self.x_bundles[fl_id], fl.dis_on_line*fl.dx_meter, strain_rate_on_fl)
+            strain_rate_at_tracers = self.interp_to_particles(fl_id, fl, strain_rate_on_fl)
 
             self.x_bundles[fl_id] += u_at_tracers*dt
             self.f_bundles[fl_id] += strain_rate_at_tracers*dt
@@ -201,13 +202,6 @@ class FBMFullTracer(object):
             while np.any(self.x_bundles[fl_id] > fl.length_m) and self.n_bundles[fl_id]>1:
                 self.remove_tracer(-1, fl_id)
 
-
-#        # If integrated state variable, increment it.
-#        if self.stepState is not None:
-#            dstate_dt = np.array([self.stepState(x, ssaModel) for x in self.x])
-#            F = self.F + dstate_dt*dt
-#        else:
-#            F = np.array([self.compState(x, ssaModel) for x in self.x])
 #
 #        self.force(F)
 #
