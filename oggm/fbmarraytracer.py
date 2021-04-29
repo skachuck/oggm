@@ -9,7 +9,7 @@ variable functions.
 """
 from __future__ import division
 import numpy as np
-from util import *
+#from util import *
 
 class FBMFullTracer(object):
     def __init__(self, model, xsep0, Nf=10, dist=None, compState=None,
@@ -57,10 +57,19 @@ class FBMFullTracer(object):
         check_calving
         calve
         """
+
+
+        self.dist = dist or strict_dist(hi=0.7)
+        self.Nf = int(Nf)
+
         # Properties of tracers
-        self.x_bundles = []
-        self.n_bundles = []
-        self.f_bundles = []
+        self.x_bundles = []         # Locations of bundles along each flowline
+        self.n_bundles = []         # Number of bundles along each flowline
+        self.f_bundles = []         # Forces on bundles along each flowline
+        # These are quantities for each individual fiber within each bundle
+        # along each flowline.
+        self.fiber_thresholds = []
+        self.fiber_states = []
         
         for fl in model.fls:
             if fl.length_m > 0:
@@ -68,12 +77,17 @@ class FBMFullTracer(object):
                 self.x_bundles.append(xfl)
                 self.n_bundles.append(len(xfl))
                 self.f_bundles.append(np.zeros_like(xfl))
+                self.fiber_thresholds.append(self.dist(len(xfl), Nf))
+                self.fiber_states.append(np.ones((len(xfl), Nf), dtype=bool))
             else:
-                self.x_bundles.append([0])
+                self.x_bundles.append(np.array([0.]))
                 self.n_bundles.append(1)
-                self.f_bundles.append(0)
+                self.f_bundles.append(np.array([0.]))
+                self.fiber_thresholds.append(self.dist((1, Nf)))
+                self.fiber_states.append(np.ones((1, Nf), dtype=bool))
 
         self.xsep = xsep or xsep0
+        self.listform=False
 #        assert compState is None or stepState is None, 'Cannot specify both'
 #        self.compState = compState
 #        self.stepState = stepState
@@ -83,7 +97,7 @@ class FBMFullTracer(object):
         # Fiber bundles 
 #        self.dist = dist or strict_dist()
         # Number of fibers per bundle
-        self.Nf = int(Nf)
+
 #        # Construct the fibers - random thresholds
 #        self.xcs = self.dist((self.N, self.Nf))
 #        # Force on each fiber bundle
@@ -94,13 +108,17 @@ class FBMFullTracer(object):
         #for fl_id, fl in enumerate(model.fls):
         #    self.fiber_states.append(np.zeros((self.n_bundles[fl_id], self.Nf
 
+        # For debugging purposes.
+        self._allow_breaking = True
 
-        self.listform=False
+
 
     def _toList(self):
         if self.listform: return
         self.x_bundles = [xfl.tolist() for xfl in self.x_bundles]
         self.f_bundles = [ffl.tolist() for ffl in self.f_bundles]
+        self.fiber_thresholds = [ffl.tolist() for ffl in self.fiber_thresholds]
+        self.fiber_states = [ffl.tolist() for ffl in self.fiber_states]
 #        self.xcs = self.xcs.tolist()
 #        self.ss = self.ss.tolist()
 #        self.F = self.F.tolist()
@@ -110,40 +128,42 @@ class FBMFullTracer(object):
         if not self.listform: return
         self.x_bundles = [np.asarray(xfl) for xfl in self.x_bundles]
         self.f_bundles = [np.asarray(ffl) for ffl in self.f_bundles]
+        self.fiber_thresholds = [np.asarray(ffl) for ffl in self.fiber_thresholds]
+        self.fiber_states = [np.asarray(ffl) for ffl in self.fiber_states]
 #        self.xcs = np.asarray(self.xcs) 
 #        self.ss = np.asarray(self.ss)
 #        self.F = np.asarray(self.F)
         self.listform = False
 
 #    @property
-#    def fiber_extension(self):
-#        return self.F/np.sum(self.ss, axis=1)
+    def bundle_extension(self, fl_id):
+        return self.f_bundles[fl_id]/np.sum(self.fiber_states[fl_id], axis=1)
 #    @property
-#    def exceeded_threshold(self):
-#        return self.xcs <= self.fiber_extension[:,None]
+    def exceeded_threshold(self, fl_id):
+        return self.fiber_thresholds[fl_id] <= self.bundle_extension(fl_id)[:,None]
 #
 #    @property
-#    def active_tracers(self):
-#        broken = np.where(np.logical_and(self.exceeded_threshold, self.ss))
-#        return np.unique(broken[0])
+    def active_bundles(self, fl_id):
+        broken = np.where(np.logical_and(self.exceeded_threshold(fl_id), 
+                        self.fiber_states[fl_id]))
+        return np.unique(broken[0])
 #
 #    @property
-#    def damage(self):
-#        return 1-np.sum(self.ss,axis=1)/self.Nf
+    def damage(self, fl_id):
+        return 1-np.sum(self.fiber_states[fl_id],axis=1)/self.Nf
 #
 #    @property
 #    def data(self):
 #        return np.vstack([self.x, self.damage])
 #
-#    def force(self, F):
-#        #print('Forcing with {}'.format(F))
-#        self.F = F
-#        # Find tracers with broken fibers 
-#        for i in self.active_tracers: 
-#            while any(self.ss[i]) and any(self.exceeded_threshold[i][self.ss[i]]):
-#                j = np.argwhere(self.exceeded_threshold[i]*self.ss[i])[0][0]
-#                #print('Breaking {} {}'.format(i,j))
-#                self.ss[i, j] = False
+    def pull_bundles_and_break_fibers(self, fl_id):
+        # Find bundles with broken fibers 
+        for i in self.active_bundles(fl_id): 
+            while (any(self.fiber_states[fl_id][i]) and
+                    any(self.exceeded_threshold(fl_id)[i][self.fiber_states[fl_id][i]])):
+                j = np.argwhere(self.exceeded_threshold(fl_id)[i]*self.fiber_states[fl_id][i])[0][0]
+                self.fiber_states[fl_id][i, j] = False
+
     def add_tracer(self, xp, fl_id, state=0):
         """
         Introduce a new particle at location xp with threshold drawn from
@@ -154,9 +174,8 @@ class FBMFullTracer(object):
         i = np.searchsorted(self.x_bundles[fl_id], xp)
         self.x_bundles[fl_id].insert(i,xp)
         self.f_bundles[fl_id].insert(i,state)
-#        self.xcs.insert(i, self.dist(self.Nf))
-#        self.F.insert(i,state)
-#        self.ss.insert(i,np.ones(self.Nf,dtype=bool))
+        self.fiber_thresholds[fl_id].insert(i,self.dist(self.Nf))
+        self.fiber_states[fl_id].insert(i,np.ones(self.Nf,dtype=bool))
         self.n_bundles[fl_id] += 1
         self._toArr()
 
@@ -167,9 +186,8 @@ class FBMFullTracer(object):
         self._toList()
         self.x_bundles[fl_id].pop(i)
         self.f_bundles[fl_id].pop(i)
-#        self.xcs.pop(i)
-#        self.F.pop(i)
-#        self.ss.pop(i)
+        self.fiber_thresholds[fl_id].pop(i)
+        self.fiber_states[fl_id].pop(i)
         self.n_bundles[fl_id] -= 1
         self._toArr()
 
@@ -202,9 +220,9 @@ class FBMFullTracer(object):
             while np.any(self.x_bundles[fl_id] > fl.length_m) and self.n_bundles[fl_id]>1:
                 self.remove_tracer(-1, fl_id)
 
-#
-#        self.force(F)
-#
+
+            self.pull_bundles_and_break_fibers(fl_id)
+
         # Drop new particles in at intervals of self.xsep
         for fl_id, fl in enumerate(model.fls):
             if self.x_bundles[fl_id][0] > self.xsep:
@@ -218,27 +236,26 @@ class FBMFullTracer(object):
 #        else:
 #            return True
 #
-#    def calve(self, i=None, x=None):
-#        """Remove broken tracer and tracers connected to the front.
-#        """
-#        if x is not None:
-#            try:
-#                i=np.argwhere(self.x > x)[0][0]
-#                print('Removing particles beyond Lmax')
-#            except IndexError:
-#                print('No particles beyond Lmax')
-#                return x
-#            
-#        elif i is None:
-#            assert self.check_calving(), 'No index given, none to break'
-#            i=np.argwhere(np.sum(self.ss,axis=1)==0)[0][0]
-#            #print(np.mean(self.xcs[i])) 
-#        xc = self.x[i]
-#        j = self.N - 1
-#        while j >= i:
-#            self.remove_tracer(j)
-#            j-=1
-#                
-#        return xc
-#
-#
+    def calve(self, fl_id, x):
+        """Remove broken tracer and tracers connected to the front.
+        """
+        i = np.searchsorted(self.x_bundles[fl_id], x)-1
+
+        j = self.n_bundles[fl_id] - 1
+        while j >= i:
+            self.remove_tracer(j, fl_id)
+            j-=1
+
+
+
+
+def strict_dist(lo=0,hi=1):
+    """Generator for strictly increasing thresholds lo to hi, excluding lo.
+    """
+    def f(s=None):
+        assert s is not None, 'No way to set one strict threshold'
+        if len(np.atleast_1d(s))==1:
+            return np.linspace(lo,hi,s+1)[1:]
+        else:
+            return np.repeat(np.linspace(lo,hi,s[1]+1)[1:][None,:],s[0],0)
+    return f

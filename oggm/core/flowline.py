@@ -1520,7 +1520,12 @@ class FluxBasedModel(FlowlineModel):
 
             # OK, we're really calving
             self.calve_by_flux(fl, last_above_wl, dt)
-
+            
+            if self.fbmtracers is not None:
+                broken_bundles = np.sum(self.fbmtracers.fiber_states[fl_id], axis=1)==0
+                if any(broken_bundles):
+                    x_broken = self.fbmtracers.x_bundles[fl_id][np.where(broken_bundles)[0][0]]
+                    self.calve_by_location(fl, fl_id, x_broken)
             
 
         # Advect tracer particles
@@ -1572,7 +1577,7 @@ class FluxBasedModel(FlowlineModel):
         # We update the glacier with our changes
         fl.section = section
 
-    def calve_by_location(self, fl, x, meters=True):
+    def calve_by_location(self, fl, fl_id, x, meters=True):
         """
         Calves flowline fl at x. Does NOT check if physically reasonable.
 
@@ -1585,11 +1590,14 @@ class FluxBasedModel(FlowlineModel):
             i = np.searchsorted(fl.dis_on_line*fl.dx_meter, x)-1
         else:
             i = np.searchsorted(fl.dis_on_line, x)-1
+            x = x*fl.dx_meter
         section = fl.section
         self.calving_m3_since_y0 += np.sum(section[i:])
         section[i:] = 0.
 
         fl.section = section
+
+        self.fbmtracers.calve(fl_id, x)
         
 
 
