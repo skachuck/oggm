@@ -1149,6 +1149,7 @@ class FluxBasedModel(FlowlineModel):
                  flux_gate=None, flux_gate_build_up=100,
                  do_kcalving=None, calving_k=None, calving_use_limiter=None,
                  calving_limiter_frac=None, water_level=None,
+                 use_fbmtracers=False, fbmkwargs={},
                  **kwargs):
         """Instanciate the model.
 
@@ -1230,6 +1231,10 @@ class FluxBasedModel(FlowlineModel):
             The best way to set the water level for real glaciers is to use
             the same as used for the inversion (this is what
             `flowline_model_run` does for you)
+        use_fbmtracers : bool
+            Use Fiber Bundles?
+        fbmkwargs : dict
+            Arguments for fiber bundle model.
         """
         super(FluxBasedModel, self).__init__(flowlines, mb_model=mb_model,
                                              y0=y0, glen_a=glen_a, fs=fs,
@@ -1331,8 +1336,10 @@ class FluxBasedModel(FlowlineModel):
             self.shapefac_stag.append(np.ones(nx+1))  # beware the ones!
             self.flux_stag.append(np.zeros(nx+1))
 
-
-        self.fbmtracers = FBMFullTracer(self, 100)
+        if use_fbmtracers: 
+            self.fbmtracers = FBMFullTracer(self, **fbmkwargs)
+        else:
+            self.fbmtracers=None
 
     def step(self, dt):
         """Advance one step."""
@@ -1524,8 +1531,18 @@ class FluxBasedModel(FlowlineModel):
             if self.fbmtracers is not None:
                 broken_bundles = np.sum(self.fbmtracers.fiber_states[fl_id], axis=1)==0
                 if any(broken_bundles):
-                    x_broken = self.fbmtracers.x_bundles[fl_id][np.where(broken_bundles)[0][0]]
-                    self.calve_by_location(fl, fl_id, x_broken)
+                    for i_broken in np.where(broken_bundles)[0]:
+                        x_broken = self.fbmtracers.x_bundles[fl_id][i_broken]
+
+                        i = np.searchsorted(fl.dis_on_line*fl.dx_meter, x_broken)-1
+                        if fl.bed_h[i] > self.water_level: continue
+                        section = fl.section
+                        self.calving_m3_since_y0 += np.sum(section[i:])
+                        section[i:] = 0.
+
+                        fl.section = section
+
+                        break
             
 
         # Advect tracer particles
@@ -1591,6 +1608,8 @@ class FluxBasedModel(FlowlineModel):
         else:
             i = np.searchsorted(fl.dis_on_line, x)-1
             x = x*fl.dx_meter
+        # Only calve if spot is below sea level
+        if fl.bed_h[i] > self.water_level: return
         section = fl.section
         self.calving_m3_since_y0 += np.sum(section[i:])
         section[i:] = 0.

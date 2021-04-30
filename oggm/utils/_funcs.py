@@ -780,3 +780,28 @@ def shape_factor_adhikari(widths, heights, is_rectangular):
     shape_factors[np.isnan(shape_factors)] = 1.
 
     return shape_factors
+
+
+def strict_dist(lo=0,hi=1):
+    """Generator for strictly increasing thresholds lo to hi, excluding lo.
+    """
+    def f(s=None):
+        assert s is not None, 'No way to set one strict threshold'
+        if len(np.atleast_1d(s))==1:
+            return np.linspace(lo,hi,s+1)[1:]
+        else:
+            return np.repeat(np.linspace(lo,hi,s[1]+1)[1:][None,:],s[0],0)
+    return f
+
+
+def uni_dist(lo,hi):
+    """Generator for uniform distribution between lo and hi.
+    """
+    def f(s=None):
+        if s is None:
+            return lo + (hi-lo)*np.random.rand()
+        elif len(np.atleast_1d(s))==1: 
+            return lo + (hi-lo)*np.random.rand(s)
+        else:
+            return lo + (hi-lo)*np.random.rand(*s)
+    return f

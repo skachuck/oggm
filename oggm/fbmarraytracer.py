@@ -1,53 +1,42 @@
 """
-fbmtracer.py
+fbmarraytracer.py
 Author: Samuel Kachuck
-Date: Sep 1, 2020
+Date: Apr 22, 2021
 
 Provides the tracer particle class that contains fiber bundles for calving the
-ssa1d class, along with a collection of random strength distributions and state
+FlowlineModel, along with a collection of random strength distributions and state
 variable functions.
 """
 from __future__ import division
 import numpy as np
-#from util import *
+from oggm.utils import strict_dist
 
 class FBMFullTracer(object):
-    def __init__(self, model, xsep0, Nf=10, dist=None, compState=None,
-    stepState=None, xsep=None, **kwargs):
+    def __init__(self, model, xsep0=100, Nf=10, dist=None, xsep=None, **kwargs):
         """
-        A container for tracer particles in a 1D fenics ice dynamics model.
+        A container for tracer particles in the flowlines of OGGM FluxBasedModel.
 
         The tracers advect with the fluid velocity, but do not affect the flow
         until the fiber bundle models they carry break, at which point calving
-        is triggered in the ice flow model.
-        There are two kinds of state variables: those that are integrated
-        through the simulation, and those that only depend on the instantaneous
-        configuration of the ice. For the former, provide a function,
-        stepState, that is used to intergate the state variable when the
-        particles advect. For the latter, provide a function that computes the
-        state variable when checking for calving. Only one may be specified.
+        is triggered in the ice flow model.  
 
         Parameters
         ----------
-        model : a FluxBasedModel whose flowlines to populate with fiber bundles
-        xsep0 : the initial separation for the fiber bundles
-        Nf    : The number of fibers per bundle
-        dist : a function that returns a random threshold
-        compState(x, ssaModel) : a function that computes the path-independent state 
-            variable from the ssaModel at locations x, default None. If both
-            compState and stepState are None, compState is defined as
-            strain_thresh.
-        stepState(x, ssaModel) : a function that computes a discrete
-            time-derivative of the state variable, for integrating, default
-            None
-        xsep : the separation of particles when added to the system
+        model   : a FluxBasedModel whose flowlines to populate with fiber bundles
+        xsep0   : the initial separation for the fiber bundles (defauly 100 m)
+        Nf      : The number of fibers per bundle (default 10)
+        dist    : a function that returns a random threshold (default
+                    strict_dist)
+        xsep    : the separation of particles when added to the system
 
         Data
         ----
-        N : number of particles
-        x : location of particles
-        s : threshold of particles
-        state : the state of each particle
+        n_bundles       : number of bundles in each flowline
+        x_bundles       : locations of bundles in each flowline
+        f_bundles       : force on each bundle in each flowline
+        fiber_thresholds: Nf fiber strengths in each bundle in each flowline
+        fiber_states    : Nf states (intact=True, broken=False) in each bundle
+                            in each flowline
 
         Methods
         -------
@@ -59,18 +48,20 @@ class FBMFullTracer(object):
         """
 
 
-        self.dist = dist or strict_dist(hi=0.7)
+        self.dist = dist or strict_dist(lo=0,hi=1.0)
         self.Nf = int(Nf)
 
         # Properties of tracers
         self.x_bundles = []         # Locations of bundles along each flowline
         self.n_bundles = []         # Number of bundles along each flowline
         self.f_bundles = []         # Forces on bundles along each flowline
-        # These are quantities for each individual fiber within each bundle
-        # along each flowline.
+        # These are quantities for each individual fiber (Nf of them) within 
+        # each bundle along each flowline.
         self.fiber_thresholds = []
         self.fiber_states = []
         
+        # Construct the initial bundle list per flowline. There must be at
+        # least one bundle in each flowline.
         for fl in model.fls:
             if fl.length_m > 0:
                 xfl = np.arange(0, fl.length_m, xsep0)
@@ -88,25 +79,6 @@ class FBMFullTracer(object):
 
         self.xsep = xsep or xsep0
         self.listform=False
-#        assert compState is None or stepState is None, 'Cannot specify both'
-#        self.compState = compState
-#        self.stepState = stepState
-#        if compState is None and stepState is None:
-#            self.compState = strain_thresh
-#
-        # Fiber bundles 
-#        self.dist = dist or strict_dist()
-        # Number of fibers per bundle
-
-#        # Construct the fibers - random thresholds
-#        self.xcs = self.dist((self.N, self.Nf))
-#        # Force on each fiber bundle
-#        self.F = np.zeros(self.N)
-#        # Broken status of each fiber in each tracer
-        # Extension of each bundle (ELS) is self.F/np.sum(self.ss, axis=1)
-        #self.fiber_states = []
-        #for fl_id, fl in enumerate(model.fls):
-        #    self.fiber_states.append(np.zeros((self.n_bundles[fl_id], self.Nf
 
         # For debugging purposes.
         self._allow_breaking = True
@@ -119,9 +91,6 @@ class FBMFullTracer(object):
         self.f_bundles = [ffl.tolist() for ffl in self.f_bundles]
         self.fiber_thresholds = [ffl.tolist() for ffl in self.fiber_thresholds]
         self.fiber_states = [ffl.tolist() for ffl in self.fiber_states]
-#        self.xcs = self.xcs.tolist()
-#        self.ss = self.ss.tolist()
-#        self.F = self.F.tolist()
         self.listform = True
 
     def _toArr(self):
@@ -130,33 +99,29 @@ class FBMFullTracer(object):
         self.f_bundles = [np.asarray(ffl) for ffl in self.f_bundles]
         self.fiber_thresholds = [np.asarray(ffl) for ffl in self.fiber_thresholds]
         self.fiber_states = [np.asarray(ffl) for ffl in self.fiber_states]
-#        self.xcs = np.asarray(self.xcs) 
-#        self.ss = np.asarray(self.ss)
-#        self.F = np.asarray(self.F)
         self.listform = False
 
-#    @property
+
     def bundle_extension(self, fl_id):
+        """Compute the extension of each bundle in flowline fl_id."""
         return self.f_bundles[fl_id]/np.sum(self.fiber_states[fl_id], axis=1)
-#    @property
+
     def exceeded_threshold(self, fl_id):
+        """Locate fibers in bundles along flowline fl_id that should break."""
         return self.fiber_thresholds[fl_id] <= self.bundle_extension(fl_id)[:,None]
-#
-#    @property
+
     def active_bundles(self, fl_id):
+        """Locate indices of bundles along fl_id with fibers that should break."""
         broken = np.where(np.logical_and(self.exceeded_threshold(fl_id), 
                         self.fiber_states[fl_id]))
         return np.unique(broken[0])
-#
-#    @property
+
     def damage(self, fl_id):
+        """Compute proportion of each bundles fibers that have broken."""
         return 1-np.sum(self.fiber_states[fl_id],axis=1)/self.Nf
-#
-#    @property
-#    def data(self):
-#        return np.vstack([self.x, self.damage])
-#
+
     def pull_bundles_and_break_fibers(self, fl_id):
+        """"""
         # Find bundles with broken fibers 
         for i in self.active_bundles(fl_id): 
             while (any(self.fiber_states[fl_id][i]) and
@@ -180,9 +145,7 @@ class FBMFullTracer(object):
         self._toArr()
 
     def remove_tracer(self, i, fl_id):
-        """
-        Revmoce ith particle from the flow, used in calving.
-        """
+        """Revmoce ith particle from flowline fl_id, used in calving."""
         self._toList()
         self.x_bundles[fl_id].pop(i)
         self.f_bundles[fl_id].pop(i)
@@ -192,35 +155,39 @@ class FBMFullTracer(object):
         self._toArr()
 
     def interp_to_particles(self, fl_id, fl, yfl):
-        """Interpolate array yfl on flowline fl to particle positions.
-        """
+        """Interpolate array yfl on flowline fl to particle positions."""
         return np.interp(self.x_bundles[fl_id], fl.dis_on_line*fl.dx_meter, yfl)
 
     def advect_particles(self, model, dt):
         """
-        Advect particles with the flow represented by vector coefficients
-        Ufunc. Drop in a new particle if required.
+        Advect bundles with the fluid velocity in model. 
+        
+        Drops in a new particle if required.
         """
         self._toArr()
-        # interpolate ice-velocities to particle positions
-        #U = np.array([ssaModel.U(x) for x in self.x])
+
+        # Advect bundles along each flowline
         for fl_id, fl in enumerate(model.fls): 
+            # Compute velocity and fill in values.
             u_on_fl = np.nan_to_num(model.flux_stag[fl_id]/(model.section_stag[fl_id]+1e-6))
             # Staggered grid has an additional grid point at end to remove
             u_on_fl = u_on_fl[:-1] 
+            # Interpolate velocity to bundle locations
             u_at_tracers = self.interp_to_particles(fl_id, fl, u_on_fl) 
 
+            # Compute the strain rate, integrated strain is used to force
+            # bundles.
             strain_rate_on_fl = np.gradient(u_on_fl, fl.dx_meter)
             strain_rate_at_tracers = self.interp_to_particles(fl_id, fl, strain_rate_on_fl)
-
+            # Update positions and integrated strains of bundles
             self.x_bundles[fl_id] += u_at_tracers*dt
             self.f_bundles[fl_id] += strain_rate_at_tracers*dt
 
             # remove particles advected beyond the front.
+            # TODO transfer particles from tributaries, if applicable.
             while np.any(self.x_bundles[fl_id] > fl.length_m) and self.n_bundles[fl_id]>1:
                 self.remove_tracer(-1, fl_id)
-
-
+            # Break any fibers that need to be broken.
             self.pull_bundles_and_break_fibers(fl_id)
 
         # Drop new particles in at intervals of self.xsep
@@ -228,17 +195,8 @@ class FBMFullTracer(object):
             if self.x_bundles[fl_id][0] > self.xsep:
                 self.add_tracer(0, fl_id)
 
-#    def check_calving(self):
-#        """Check if any FBMs have exceeded their thresholds.
-#        """
-#        if all(np.sum(self.ss, axis=1)):
-#            return False
-#        else:
-#            return True
-#
     def calve(self, fl_id, x):
-        """Remove broken tracer and tracers connected to the front.
-        """
+        """Remove bundles at and to the right of x along fl_id."""
         i = np.searchsorted(self.x_bundles[fl_id], x)-1
 
         j = self.n_bundles[fl_id] - 1
@@ -246,16 +204,3 @@ class FBMFullTracer(object):
             self.remove_tracer(j, fl_id)
             j-=1
 
-
-
-
-def strict_dist(lo=0,hi=1):
-    """Generator for strictly increasing thresholds lo to hi, excluding lo.
-    """
-    def f(s=None):
-        assert s is not None, 'No way to set one strict threshold'
-        if len(np.atleast_1d(s))==1:
-            return np.linspace(lo,hi,s+1)[1:]
-        else:
-            return np.repeat(np.linspace(lo,hi,s[1]+1)[1:][None,:],s[0],0)
-    return f
