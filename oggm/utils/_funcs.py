@@ -805,3 +805,28 @@ def uni_dist(lo,hi):
         else:
             return lo + (hi-lo)*np.random.rand(*s)
     return f
+
+def weib_dist(l,a):
+    """Weibull distribution with factor l and shape a
+    """
+    def f(s=None):
+        if s is None:
+            return np.random.weibull(a)*l
+        elif len(np.atleast_1d(s))==1: 
+            return np.random.weibull(a)*l
+        else:
+            return np.random.weibull(a)*l 
+    return f
+
+def norm_dist(mu,sig):
+    """Normal distribution, positive only
+    """
+    def f(s=None):
+        if s is None:
+            return np.abs((np.random.randn()+mu)*sig)
+        elif len(np.atleast_1d(s))==1: 
+            return np.abs((np.random.randn(s)+mu)*sig)
+        else:
+            return np.abs((np.random.randn(*s)+mu)*sig)
+    return f
+
