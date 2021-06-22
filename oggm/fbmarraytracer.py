@@ -204,3 +204,40 @@ class FBMFullTracer(object):
             self.remove_tracer(j, fl_id)
             j-=1
 
+
+    def get_diagnostics(self, model=None, fl_id=-1):
+        """Obtain model diagnostics in a pandas DataFrame.
+
+        Parameters
+        ----------
+        fl_id : int
+            the index of the flowline of interest, from 0 to n_flowline-1.
+            Default is to take the last (main) one
+
+        Returns
+        -------
+        a pandas DataFrame, which index is distance along flowline (m). Units:
+            - surface_h, bed_h, ice_tick, section_width: m
+            - section_area: m2
+            - slope: -
+            - ice_flux, tributary_flux: m3 of *ice* per second
+            - ice_velocity: m per second (depth-section integrated)
+        """
+        import pandas as pd 
+
+        df = pd.DataFrame(index=self.x_bundles[fl_id])
+        df.index.name = 'distance_along_flowline'
+        df['damage'] = self.damage(fl_id)
+        df['force'] = self.f_bundles[fl_id]
+
+        if model is not None:
+            thick = self.interp_to_particles(fl_id, 
+                                                model.fls[fl_id],
+                                                model.fls[fl_id].thick)
+            bed = self.interp_to_particles(fl_id, 
+                                                model.fls[fl_id],
+                                                model.fls[fl_id].bed_h)
+            df['height'] = bed + 0.5*thick
+
+        return df
+
