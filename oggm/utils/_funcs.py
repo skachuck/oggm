@@ -813,9 +813,9 @@ def weib_dist(l,a):
         if s is None:
             return np.random.weibull(a)*l
         elif len(np.atleast_1d(s))==1: 
-            return np.random.weibull(a)*l
+            return np.random.weibull(a, size=s)*l
         else:
-            return np.random.weibull(a)*l 
+            return np.random.weibull(a, size=s)*l 
     return f
 
 def norm_dist(mu,sig):
